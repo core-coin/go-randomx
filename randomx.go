@@ -16,18 +16,23 @@ import (
 
 const RxHashSize = C.RANDOMX_HASH_SIZE
 
-// All flags
-const (
-	FlagDefault     C.randomx_flags = 8 + 4 // for all default
-	FlagLargePages  C.randomx_flags = 1     // for dataset & rxCache & vm
-	FlagHardAES     C.randomx_flags = 2     // for vm
-	FlagFullMEM     C.randomx_flags = 4     // for vm
-	FlagJIT         C.randomx_flags = 8     // for vm & cache
-	FlagSecure      C.randomx_flags = 16
-	FlagArgon2SSSE3 C.randomx_flags = 32 // for cache
-	FlagArgon2AVX2  C.randomx_flags = 64 // for cache
-	FlagArgon2      C.randomx_flags = 96 // = avx2 + sse3
+type Flag int
+
+var (
+	FlagDefault     Flag = 8 + 4 // for all default
+	FlagLargePages  Flag = 1     // for dataset & rxCache & vm
+	FlagHardAES     Flag = 2     // for vm
+	FlagFullMEM     Flag = 4     // for vm
+	FlagJIT         Flag = 8     // for vm & cache
+	FlagSecure      Flag = 16
+	FlagArgon2SSSE3 Flag = 32 // for cache
+	FlagArgon2AVX2  Flag = 64 // for cache
+	FlagArgon2      Flag = 96 // = avx2 + sse3
 )
+
+func (f Flag) toC() C.randomx_flags {
+	return (C.randomx_flags)(f)
+}
 
 type Cache *C.randomx_cache
 
@@ -35,7 +40,7 @@ type Dataset *C.randomx_dataset
 
 type VM *C.randomx_vm
 
-func AllocCache(flags ...C.randomx_flags) (Cache, error) {
+func AllocCache(flags ...Flag) (Cache, error) {
 	var SumFlag = FlagDefault
 	var cache *C.randomx_cache
 
@@ -43,7 +48,7 @@ func AllocCache(flags ...C.randomx_flags) (Cache, error) {
 		SumFlag = SumFlag | flag
 	}
 
-	cache = C.randomx_alloc_cache(SumFlag)
+	cache = C.randomx_alloc_cache(SumFlag.toC())
 	if cache == nil {
 		return nil, errors.New("failed to alloc mem for rxCache")
 	}
@@ -63,14 +68,14 @@ func ReleaseCache(cache Cache) {
 	C.randomx_release_cache(cache)
 }
 
-func AllocDataset(flags ...C.randomx_flags) (Dataset, error) {
+func AllocDataset(flags ...Flag) (Dataset, error) {
 	var SumFlag = FlagDefault
 	for _, flag := range flags {
 		SumFlag = SumFlag | flag
 	}
 
 	var dataset *C.randomx_dataset
-	dataset = C.randomx_alloc_dataset(SumFlag)
+	dataset = C.randomx_alloc_dataset(SumFlag.toC())
 	if dataset == nil {
 		return nil, errors.New("failed to alloc mem for dataset")
 	}
@@ -123,7 +128,7 @@ func ReleaseDataset(dataset Dataset) {
 	C.randomx_release_dataset(dataset)
 }
 
-func CreateVM(cache Cache, dataset Dataset, flags ...C.randomx_flags) (VM, error) {
+func CreateVM(cache Cache, dataset Dataset, flags ...Flag) (VM, error) {
 	var SumFlag = FlagDefault
 	for _, flag := range flags {
 		SumFlag = SumFlag | flag
@@ -133,7 +138,7 @@ func CreateVM(cache Cache, dataset Dataset, flags ...C.randomx_flags) (VM, error
 		panic("failed creating vm: using empty dataset")
 	}
 
-	vm := C.randomx_create_vm(SumFlag, cache, dataset)
+	vm := C.randomx_create_vm(SumFlag.toC(), cache, dataset)
 
 	if vm == nil {
 		return nil, errors.New("failed to create vm")
@@ -180,16 +185,11 @@ func CalculateHashFirst(vm VM, in []byte) {
 }
 
 func CalculateHashNext(vm VM, in []byte) []byte {
+	out := make([]byte, RxHashSize)
 	if vm == nil {
 		panic("failed hashing: using empty vm")
 	}
 
-	input := C.CBytes(in)
-	output := C.CBytes(make([]byte, RxHashSize))
-	C.randomx_calculate_hash_next(vm, input, C.size_t(len(in)), output)
-	hash := C.GoBytes(output, RxHashSize)
-	C.free(unsafe.Pointer(input))
-	C.free(unsafe.Pointer(output))
-
-	return hash
+	C.randomx_calculate_hash_next(vm, unsafe.Pointer(&in[0]), C.size_t(len(in)), unsafe.Pointer(&out[0]))
+	return out
 }
